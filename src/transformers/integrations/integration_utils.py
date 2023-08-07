@@ -26,7 +26,7 @@ import sys
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -1620,7 +1620,12 @@ INTEGRATION_TO_CALLBACK = {
 }
 
 
-def get_reporting_integration_callbacks(report_to):
+def get_reporting_integration_callbacks(report_to: Optional[Union[str, List[str]]]) -> List[TrainerCallback]:
+    if report_to is None:
+        return []
+    if isinstance(report_to, str):
+        report_to = [report_to]
+
     for integration in report_to:
         if integration not in INTEGRATION_TO_CALLBACK:
             raise ValueError(
