@@ -1624,8 +1624,12 @@ def get_reporting_integration_callbacks(report_to: Optional[Union[str, List[str]
     if report_to is None:
         return []
     if isinstance(report_to, str):
-        report_to = [report_to]
-
+        if report_to == "all":
+            report_to = get_available_reporting_integrations()
+        elif report_to == "none":
+            report_to = get_available_reporting_integrations()  # will change to [] in the future
+        else:
+            report_to = report_to.split()  # support space separated strings
     for integration in report_to:
         if integration not in INTEGRATION_TO_CALLBACK:
             raise ValueError(
