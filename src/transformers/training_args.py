@@ -1079,7 +1079,7 @@ class TrainingArguments:
         default="length",
         metadata={"help": "Column name with precomputed lengths to use when grouping by length."},
     )
-    report_to: Optional[List[str]] = field(
+    report_to: Optional[Union[List[str], str]] = field(
         default=None, metadata={"help": "The list of integrations to report the results and logs to."}
     )
     ddp_find_unused_parameters: Optional[bool] = field(
@@ -1511,15 +1511,15 @@ class TrainingArguments:
                 "now. You should start updating your code and make this info disappear :-)."
             )
             self.report_to = "all"
-        if self.report_to == "all" or self.report_to == ["all"]:
+        if self.report_to == "all":
             # Import at runtime to avoid a circular import.
             from .integrations import get_available_reporting_integrations
 
             self.report_to = get_available_reporting_integrations()
-        elif self.report_to == "none" or self.report_to == ["none"]:
+        elif self.report_to == "none":
             self.report_to = []
         elif not isinstance(self.report_to, list):
-            self.report_to = [self.report_to]
+            self.report_to = self.report_to.split()
 
         if self.warmup_ratio < 0 or self.warmup_ratio > 1:
             raise ValueError("warmup_ratio must lie in range [0,1]")
