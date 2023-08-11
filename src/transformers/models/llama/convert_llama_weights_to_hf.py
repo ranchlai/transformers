@@ -281,7 +281,7 @@ def main():
     )
     parser.add_argument(
         "--model_size",
-        choices=["7B", "7Bf", "13B", "13Bf", "30B", "65B", "70B", "70Bf", "tokenizer_only"],
+        choices=["7B", "7Bf", "13B", "13Bf", "30B", "65B", "70B", "70Bf", "tokenizer_only", ""],
         help="'f' models correspond to the finetuned versions, and are specific to the Llama2 official release. For more details on Llama2, checkout the original repo: https://huggingface.co/meta-llama",
     )
     parser.add_argument(
@@ -290,6 +290,11 @@ def main():
     )
     parser.add_argument("--safe_serialization", type=bool, help="Whether or not to save using `safetensors`.")
     args = parser.parse_args()
+    if args.model_size == "":
+        if "7b" in args.input_dir:
+            args.model_size = "7B"
+         
+        
     if args.model_size != "tokenizer_only":
         write_model(
             model_path=args.output_dir,
