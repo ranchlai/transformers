@@ -361,6 +361,8 @@ class LlamaAttention(nn.Module):
 
             query_states = [F.linear(hidden_states, query_slices[i]) for i in range(self.config.pretraining_tp)]
             query_states = torch.cat(query_states, dim=-1)
+            
+            
 
             key_states = [F.linear(hidden_states, key_slices[i]) for i in range(self.config.pretraining_tp)]
             key_states = torch.cat(key_states, dim=-1)
@@ -381,8 +383,14 @@ class LlamaAttention(nn.Module):
         if past_key_value is not None:
             kv_seq_len += past_key_value[0].shape[-2]
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-
+        # print("position_ids at attention", position_ids)
+        
+        # import pdb; pdb.set_trace()
+        try:
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+        except:
+            import pdb; pdb.set_trace()
+            
         if past_key_value is not None:
             # reuse k, v, self_attention
             key_states = torch.cat([past_key_value[0], key_states], dim=2)
@@ -410,7 +418,10 @@ class LlamaAttention(nn.Module):
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_output = torch.matmul(attn_weights, value_states)
+        try:
+            attn_output = torch.matmul(attn_weights, value_states)
+        except:
+            import pdb; pdb.set_trace()
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
@@ -685,7 +696,10 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
         
         hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        try:
+            hidden_states = residual + hidden_states
+        except RuntimeError:
+            import pdb; pdb.set_trace()
 
         outputs = (hidden_states,)
 
@@ -940,6 +954,12 @@ class LlamaModel(LlamaPreTrainedModel):
         next_decoder_cache = () if use_cache else None
 
         for idx, decoder_layer in enumerate(self.layers):
+            # print the dtype and device of the layer
+            # print("===================================")
+            # print(idx, decoder_layer)
+            # for name, param in decoder_layer.named_parameters():
+            #     print(name, param.dtype, param.device)
+            
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -958,6 +978,7 @@ class LlamaModel(LlamaPreTrainedModel):
                     create_custom_forward(decoder_layer), hidden_states, attention_mask, position_ids
                 )
             else:
+                # print("position_ids at decoder", position_ids)
                 layer_outputs = decoder_layer(
                     hidden_states,
                     attention_mask=attention_mask,
@@ -1130,6 +1151,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
+            position_ids = position_ids.to(input_ids.device)
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
