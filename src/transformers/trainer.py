@@ -393,15 +393,21 @@ class Trainer:
         # At this stage the model is already loaded
         if getattr(model, "is_quantized", False):
             if getattr(model, "_is_quantized_training_enabled", False):
+                if model.is_loaded_in_4bit:
+                    bits = 4
+                elif model.is_loaded_in_8bit:
+                    bits = 8
+                else:
+                    bits = "k"  # for future compatibility
                 logger.info(
-                    "The model is loaded in 8-bit precision. To train this model you need to add additional modules"
+                    f"The model is loaded in {bits}-bit precision. To train this model you need to add additional modules"
                     " inside the model such as adapters using `peft` library and freeze the model weights. Please"
                     " check "
                     " the examples in https://github.com/huggingface/peft for more details."
                 )
             else:
                 raise ValueError(
-                    "The model you want to train is loaded in 8-bit precision.  if you want to fine-tune an 8-bit"
+                    f"The model you want to train is loaded in {bits}-bit precision.  if you want to fine-tune an {bits}-bit"
                     " model, please make sure that you have installed `bitsandbytes>=0.37.0`. "
                 )
 
