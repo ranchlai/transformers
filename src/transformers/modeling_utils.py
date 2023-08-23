@@ -1218,7 +1218,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             raise ValueError(
                 f"Can't instantiate {cls.__name__} model under dtype={dtype} since it is not a floating point dtype"
             )
-
         logger.info(f"Instantiating {cls.__name__} model under default dtype {dtype}.")
         dtype_orig = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
@@ -2583,7 +2582,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 raise ImportError(
                     "Using `low_cpu_mem_usage=True` or a `device_map` requires Accelerate: `pip install accelerate`"
                 )
-
         quantization_method_from_args = None
         if quantization_config is not None:
             quantization_method_from_args = getattr(
@@ -2598,9 +2596,15 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 **kwargs,
             )
         elif quantization_method_from_args == QuantizationMethod.BITS_AND_BYTES:
+            
+            if load_in_4bit is not None or load_in_8bit is not None:
+                logger.warning("You passed `load_in_8bit` or `load_in_4bit` as a kwarg, but you also passed"
+                               " `quantization_config` as a kwarg. The `load_in_8bit` and `load_in_4bit` arguments will"
+                               " be ignored.")
+                
             load_in_8bit = quantization_config.load_in_8bit
             load_in_4bit = quantization_config.load_in_4bit
-
+            
             quantization_config_kwargs = {
                 k: v for k, v in kwargs.items() if k in inspect.signature(BitsAndBytesConfig).parameters
             }
@@ -2611,10 +2615,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     "`quantization_config` argument at the same time."
                 )
 
+        quantized_bits = 4 if load_in_4bit else 8 if load_in_8bit else None
+        
         if load_in_8bit or load_in_4bit:
             if not (is_accelerate_available() and is_bitsandbytes_available()):
                 raise ImportError(
-                    "Using `load_in_8bit=True` requires Accelerate: `pip install accelerate` and the latest version of"
+                    f"Using `load_in_{quantized_bits}bit=True` requires Accelerate: `pip install accelerate` and the latest version of"
                     " bitsandbytes `pip install -i https://test.pypi.org/simple/ bitsandbytes` or"
                     " pip install bitsandbytes` "
                 )
@@ -2623,7 +2629,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 # We force the `dtype` to be float16, this is a requirement from `bitsandbytes`
                 logger.info(
                     f"Overriding torch_dtype={torch_dtype} with `torch_dtype=torch.float16` due to "
-                    "requirements of `bitsandbytes` to enable model loading in 8-bit or 4-bit. "
+                    f"requirements of `bitsandbytes` to enable model loading in {quantized_bits}bit. "
                     "Pass your own torch_dtype to specify the dtype of the remaining non-linear layers or pass"
                     " torch_dtype=torch.float16 to remove this warning."
                 )
@@ -3095,14 +3101,11 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             keep_in_fp32_modules = []
 
         if load_in_8bit or load_in_4bit:
-            from .integrations import get_keys_to_not_convert, replace_with_bnb_linear
+            logger.info(f"Detected {quantized_bits}-bit loading: activating {quantized_bits}-bit loading for this model")
+            from .utils.bitsandbytes import get_keys_to_not_convert, replace_with_bnb_linear
 
             llm_int8_skip_modules = quantization_config.llm_int8_skip_modules
             load_in_8bit_fp32_cpu_offload = quantization_config.llm_int8_enable_fp32_cpu_offload
-            if load_in_8bit:
-                logger.info("Detected 8-bit loading: activating 8-bit loading for this model")
-            else:
-                logger.info("Detected 4-bit loading: activating 4-bit loading for this model")
 
             # We keep some modules such as the lm_head in their original dtype for numerical stability reasons
             if llm_int8_skip_modules is None:
@@ -3123,7 +3126,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     raise ValueError(
                         "If you want to offload some keys to `cpu` or `disk`, you need to set "
                         "`llm_int8_enable_fp32_cpu_offload=True`. Note that these modules will not be "
-                        " converted to 8-bit but kept in 32-bit."
+                        f" converted to {quantized_bits}-bit but kept in 32-bit."
                     )
 
                 modules_to_not_convert.extend(keys_on_cpu)
@@ -3147,9 +3150,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             model.config.quantization_config = quantization_config
             model.is_8bit_serializable = is_8bit_serializable
 
-        if load_in_8bit and torch_dtype is None:
+        if (load_in_8bit or load_in_4bit) and torch_dtype is None:
             logger.warning(
-                "You are loading your model in 8bit but you did not specify a `torch_dtype` attribute."
+                f"You are loading your model in {quantized_bits}bit but you did not specify a `torch_dtype` attribute."
                 "All non-linear modules will be loaded in full precision."
                 " If you want to load the other modules in other precision, please specify a `torch_dtype` attribute."
             )
@@ -3326,6 +3329,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         model.is_loaded_in_4bit = load_in_4bit
         model.is_loaded_in_8bit = load_in_8bit
+        model.quantized_bits = quantized_bits
+
+            
 
         # make sure token embedding weights are still tied if needed
         model.tie_weights()
