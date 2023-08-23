@@ -86,6 +86,13 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        if torch.isinf(hidden_states).any():
+            logger.warning("hidden_states has inf, will clamp to 1000")
+            hidden_states = torch.clamp(hidden_states, max=10000, min=-10000)
+            
+        if torch.isnan(hidden_states).any():
+            raise ValueError("hidden_states has nan")
+        
         return self.weight * hidden_states.to(input_dtype)
 
 
@@ -105,6 +112,9 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         )
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
+        dtype = torch.float32
+        if dtype != torch.float32:
+            logger.warning(f"forcing dtype from {dtype} to float32 for ccomputing LlamaRotaryEmbedding")
         self.max_seq_len_cached = seq_len
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
 
@@ -115,6 +125,7 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
+        # assert x.dtype == torch.float32, f"input dtype must be float32, got {x.dtype}"
         # x: [bs, num_attention_heads, seq_len, head_size]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
@@ -200,6 +211,7 @@ class LlamaMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
+        input_type = x.dtype
         if self.config.pretraining_tp > 1:
             slice = self.intermediate_size // self.config.pretraining_tp
             gate_proj_slices = self.gate_proj.weight.split(slice, dim=0)
@@ -217,8 +229,16 @@ class LlamaMLP(nn.Module):
             ]
             down_proj = sum(down_proj)
         else:
+            x = x.to(torch.float32)
+            # if torch.isinf(x).any():
+            #     logger.warning("x has inf, will clamp to 1000")
+            #     x = torch.clamp(x, min=-1000, max=1000)
             down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-
+            if torch.isinf(down_proj).any():
+                logger.warning("down_proj has inf, will clamp to 1000")
+                down_proj = torch.clamp(down_proj, min=-1000, max=1000)
+                
+            down_proj = down_proj.to(input_type)
         return down_proj
 
 
@@ -277,7 +297,7 @@ class LlamaAttention(nn.Module):
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
-
+    
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -366,7 +386,7 @@ class LlamaAttention(nn.Module):
             attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.config.pretraining_tp)])
         else:
             attn_output = self.o_proj(attn_output)
-
+            torch.nn.Linear
         if not output_attentions:
             attn_weights = None
 
@@ -418,11 +438,26 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
         )
+        if torch.isnan(hidden_states).any():
+            raise ValueError("hidden_states has nan")
+        
+        if torch.isinf(hidden_states).any():
+            logger.warning("hidden_states has inf, will clamp to 1000")
+            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
+            
+            
         hidden_states = residual + hidden_states
 
         # Fully Connected
         residual = hidden_states
+       
+            
         hidden_states = self.post_attention_layernorm(hidden_states)
+        
+        if torch.isinf(hidden_states).any():
+            logger.warning("hidden_states has inf, will clamp to 1000")
+            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
+        
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 

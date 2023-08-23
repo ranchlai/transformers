@@ -765,7 +765,8 @@ class GenerationConfig(PushToHubMixin):
         config = cls(**{**config_dict, **kwargs})
         unused_kwargs = config.update(**kwargs)
 
-        logger.info(f"Generate config {config}")
+        # logger.info(f"Generate config {config}")
+        # import pdb; pdb.set_trace()
         if return_unused_kwargs:
             return config, unused_kwargs
         else:

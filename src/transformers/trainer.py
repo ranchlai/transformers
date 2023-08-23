@@ -396,14 +396,17 @@ class Trainer:
         # At this stage the model is already loaded
         if getattr(model, "is_quantized", False):
             if getattr(model, "_is_quantized_training_enabled", False):
-                logger.info(
-                    "The model is quantized. To train this model you need to add additional modules"
-                    " inside the model such as adapters using `peft` library and freeze the model weights. Please"
-                    " check the examples in https://github.com/huggingface/peft for more details."
-                )
+                if getattr(model, "active_peft_config", None) is None:
+                    # if no adapter is added, warn the user
+                    logger.warning(
+                        "The model is quantized. To train this model you need to add additional modules"
+                        " inside the model such as adapters using `peft` library and freeze the model weights. Please"
+                        " check the examples in https://github.com/huggingface/peft for more details."
+                    )
             else:
                 raise ValueError(
-                    "The model you want to train is loaded in 8-bit precision.  if you want to fine-tune an 8-bit"
+                    f"The model you want to train is loaded in {model.quantized_bits}-bit precision. "
+                    f"if you want to fine-tune an {model.quantized_bits}-bit"
                     " model, please make sure that you have installed `bitsandbytes>=0.41.1`. "
                 )
 
@@ -1012,7 +1015,7 @@ class Trainer:
                 The training arguments for the training session.
 
         """
-
+        # import pdb; pdb.set_trace()
         # parse args.optim_args
         optim_args = {}
         if args.optim_args:
@@ -1308,6 +1311,7 @@ class Trainer:
         return model
 
     def _wrap_model(self, model, training=True, dataloader=None):
+        # import pdb; pdb.set_trace()
         if self.args.use_ipex:
             dtype = torch.bfloat16 if self.use_cpu_amp else torch.float32
             model = self.ipex_optimize_model(model, training, dtype=dtype)
@@ -1772,6 +1776,8 @@ class Trainer:
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
             epoch_iterator = train_dataloader
+            
+            # will need to set
 
             # Reset the past mems state at the beginning of each epoch if necessary.
             if args.past_index >= 0:
@@ -1860,7 +1866,7 @@ class Trainer:
                                 xm.all_reduce("sum", gradients, scale=1.0 / xm.xrt_world_size())
                             # AMP: gradients need unscaling
                             self.scaler.unscale_(self.optimizer)
-
+                        # import pdb; pdb.set_trace()
                         if is_sagemaker_mp_enabled() and args.fp16:
                             self.optimizer.clip_master_grads(args.max_grad_norm)
                         elif hasattr(self.optimizer, "clip_grad_norm"):
@@ -1880,7 +1886,7 @@ class Trainer:
                                 model.parameters(),
                                 args.max_grad_norm,
                             )
-
+                    # import pdb; pdb.set_trace()
                     # Optimizer step
                     optimizer_was_run = True
                     if is_torch_tpu_available():
@@ -1897,7 +1903,9 @@ class Trainer:
                         scale_after = self.scaler.get_scale()
                         optimizer_was_run = scale_before <= scale_after
                     else:
+                        # import pdb; pdb.set_trace()
                         self.optimizer.step()
+                        # print("self.accelerator.optimizer_step_was_skipped=", self.accelerator.optimizer_step_was_skipped)
                         optimizer_was_run = not self.accelerator.optimizer_step_was_skipped
 
                     if optimizer_was_run:
@@ -2657,7 +2665,7 @@ class Trainer:
         """
         model.train()
         inputs = self._prepare_inputs(inputs)
-
+        # import pdb; pdb.set_trace()
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
@@ -2684,11 +2692,18 @@ class Trainer:
 
         Subclass and override for custom behavior.
         """
+        # import pdb;pdb.set_trace()
         if self.label_smoother is not None and "labels" in inputs:
             labels = inputs.pop("labels")
         else:
             labels = None
         outputs = model(**inputs)
+        # raise error if outputs contains nan
+        if torch.isnan(outputs["logits"]).any():
+            raise ValueError("Model outputs contains nan.")
+            
+            
+        # import pdb; pdb.set_trace()
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
