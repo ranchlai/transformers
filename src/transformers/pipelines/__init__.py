@@ -32,6 +32,7 @@ from ..models.auto.image_processing_auto import IMAGE_PROCESSOR_MAPPING, AutoIma
 from ..models.auto.modeling_auto import AutoModelForDepthEstimation
 from ..models.auto.tokenization_auto import TOKENIZER_MAPPING, AutoTokenizer
 from ..tokenization_utils import PreTrainedTokenizer
+from ..modeling_utils import PreTrainedModel
 from ..utils import (
     HUGGINGFACE_CO_RESOLVE_ENDPOINT,
     is_kenlm_available,
@@ -698,8 +699,17 @@ def pipeline(
             " feature_extractor may not be compatible with the default model. Please provide a PreTrainedModel class"
             " or a path/identifier to a pretrained model when providing feature_extractor."
         )
+    
     if isinstance(model, Path):
         model = str(model)
+        
+    if isinstance(model, PreTrainedModel):
+        # if model has attribute `active_adapter` but is not a peft model, raise error
+        if hasattr(model, 'adapter_name'):
+            raise ValueError(
+                'Model is not a peft model, but has attribute `active_adapter`.'
+            )
+        # check if there is lora layer in the model
 
     # Config is the primordial information item.
     # Instantiate config if needed
