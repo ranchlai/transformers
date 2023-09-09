@@ -645,7 +645,8 @@ class ConstrainedBeamSearchScorer(BeamScorer):
             self._done[batch_idx] = self._done[batch_idx] or beam_hyp.is_done(
                 next_scores[batch_idx].max().item(), cur_len
             )
-
+        if next_beam_scores.view(-1)[0] < -2.8031e+37:
+            import pdb; pdb.set_trace()
         return UserDict(
             {
                 "next_beam_scores": next_beam_scores.view(-1),
