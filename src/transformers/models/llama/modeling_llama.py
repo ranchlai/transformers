@@ -93,6 +93,11 @@ class LlamaRMSNorm(nn.Module):
         if torch.isnan(hidden_states).any():
             raise ValueError("hidden_states has nan")
         
+        # check if hidden_states is on the same device as self.weight, if not, cast
+        if hidden_states.device != self.weight.device:
+            print(f"hidden_states.device: {hidden_states.device}, self.weight.device: {self.weight.device}")
+            hidden_states = hidden_states.to(self.weight.device)
+            
         return self.weight * hidden_states.to(input_dtype)
 
 

@@ -3351,8 +3351,14 @@ class GenerationMixin:
             next_token_scores = nn.functional.log_softmax(
                 next_token_logits, dim=-1
             )  # (batch_size * num_beams, vocab_size)
-
+            # print("next_token_scores", next_token_scores)
             next_token_scores_processed = logits_processor(input_ids, next_token_scores)
+            # print("next_token_scores_processed", next_token_scores_processed)
+            # print("beam_scores", beam_scores)
+            # scale down beam_scores 
+            beam_scores = beam_scores / (1e-8 + beam_scores.max().abs()) *next_token_scores_processed.max().abs()
+            # print("beam_scores after normalization", beam_scores)
+            
             next_token_scores = next_token_scores_processed + beam_scores[:, None].expand_as(next_token_scores)
             # Note: logits warpers are intentionally applied after adding running beam scores. On some logits warpers
             # (like top_p) this is indiferent, but on others (like temperature) it is not. For reference, see
@@ -3382,8 +3388,10 @@ class GenerationMixin:
             next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
 
             probs = nn.functional.softmax(next_token_scores, dim=-1)
-
-            next_tokens = torch.multinomial(probs, num_samples=2 * num_beams)
+            try:
+                next_tokens = torch.multinomial(probs, num_samples=2 * num_beams)
+            except RuntimeError:
+                import pdb; pdb.set_trace()
             next_token_scores = torch.gather(next_token_scores, -1, next_tokens)
 
             next_token_scores, _indices = torch.sort(next_token_scores, descending=True, dim=1)

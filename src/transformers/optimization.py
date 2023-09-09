@@ -161,7 +161,8 @@ def get_cosine_schedule_with_warmup(
     Return:
         `torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
     """
-
+    num_cycles = 0.4
+    logger.warning(f"setting num_cycles to {num_cycles} so the learning rate ends up at 10% of the max lr.")
     lr_lambda = partial(
         _get_cosine_schedule_with_warmup_lr_lambda,
         num_warmup_steps=num_warmup_steps,

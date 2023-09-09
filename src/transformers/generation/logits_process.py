@@ -454,6 +454,10 @@ class TopKLogitsWarper(LogitsWarper):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         top_k = min(self.top_k, scores.size(-1))  # Safety check
         # Remove all tokens with a probability less than the last token of the top-k
+        # import pdb; pdb.set_trace()
+        # if all scores are the same, raise error
+        if scores.max() == scores.min():
+            logger.warning(f"All scores are the same.:{scores.max()}.")
         indices_to_remove = scores < torch.topk(scores, top_k)[0][..., -1, None]
         scores = scores.masked_fill(indices_to_remove, self.filter_value)
         return scores

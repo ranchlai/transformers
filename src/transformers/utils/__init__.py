@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from huggingface_hub import get_full_repo_name  # for backward compatibility
+# from huggingface_hub import get_full_repo_name  # for backward compatibility
 from packaging import version
 
 from .. import __version__
