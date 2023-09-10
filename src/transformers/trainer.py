@@ -416,14 +416,9 @@ class Trainer:
                     )
             else:
                 raise ValueError(
-<<<<<<< HEAD
                     f"The model you want to train is loaded in {model.quantized_bits}-bit precision. "
                     f"if you want to fine-tune an {model.quantized_bits}-bit"
                     " model, please make sure that you have installed `bitsandbytes>=0.41.1`. "
-=======
-                    "The model you want to train is loaded in 8-bit precision.  if you want to fine-tune an 8-bit"
-                    " model, please make sure that you have installed `bitsandbytes>=0.37.0`. "
->>>>>>> 95b374952dc27d8511541d6f5a4e22c9ec11fb24
                 )
 
         # Setup Sharded DDP training

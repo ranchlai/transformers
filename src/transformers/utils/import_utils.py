@@ -144,7 +144,6 @@ else:
 
 
 _tf_version = "N/A"
-import pdb; pdb.set_trace()
 _tf_available = False
 if FORCE_TF_AVAILABLE in ENV_VARS_TRUE_VALUES:
     _tf_available = True
@@ -370,7 +369,6 @@ def is_bs4_available():
 
 
 def is_tf_available():
-    import pdb; pdb.set_trace()
     return _tf_available
 
 
