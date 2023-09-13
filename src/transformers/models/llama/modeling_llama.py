@@ -87,7 +87,7 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         if torch.isinf(hidden_states).any():
             logger.warning("hidden_states has inf, will clamp to 1000")
-            hidden_states = torch.clamp(hidden_states, max=10000, min=-10000)
+            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
             
         if torch.isnan(hidden_states).any():
             raise ValueError("hidden_states has nan")
@@ -236,11 +236,12 @@ class LlamaMLP(nn.Module):
             x = x.to(torch.float32)
             # if torch.isinf(x).any():
             #     logger.warning("x has inf, will clamp to 1000")
-            #     x = torch.clamp(x, min=-1000, max=1000)
-            down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-            if torch.isinf(down_proj).any():
-                logger.warning("down_proj has inf, will clamp to 1000")
-                down_proj = torch.clamp(down_proj, min=-1000, max=1000)
+            up = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+            up = torch.clamp(up, min=-300, max=300)
+            down_proj = self.down_proj(up)
+            # if torch.isinf(down_proj).any():
+                # logger.warning("down_proj has inf, will clamp to 1000")
+            down_proj = torch.clamp(down_proj, min=-1000, max=1000)
                 
             down_proj = down_proj.to(input_type)
         return down_proj
@@ -464,12 +465,13 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
         )
+        
         if torch.isnan(hidden_states).any():
             raise ValueError("hidden_states has nan")
         
-        if torch.isinf(hidden_states).any():
-            logger.warning("hidden_states has inf, will clamp to 1000")
-            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
+        # if torch.isinf(hidden_states).any():
+        #     logger.warning("hidden_states has inf, will clamp to 1000")
+        hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
             
             
         hidden_states = residual + hidden_states
@@ -480,9 +482,9 @@ class LlamaDecoderLayer(nn.Module):
             
         hidden_states = self.post_attention_layernorm(hidden_states)
         
-        if torch.isinf(hidden_states).any():
-            logger.warning("hidden_states has inf, will clamp to 1000")
-            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
+        # if torch.isinf(hidden_states).any():
+        #     logger.warning("hidden_states has inf, will clamp to 1000")
+        hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
         
         hidden_states = self.mlp(hidden_states)
         try:
@@ -723,7 +725,8 @@ class LlamaModel(LlamaPreTrainedModel):
         )
 
         hidden_states = inputs_embeds
-
+        # import pdb; pdb.set_trace()
+        # use_cache = False
         if self.gradient_checkpointing and self.training:
             if use_cache:
                 logger.warning_once(
