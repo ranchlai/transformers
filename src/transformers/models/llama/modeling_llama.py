@@ -46,7 +46,10 @@ if is_flash_attn_available():
     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
 
 
-logger = logging.get_logger(__name__)
+from ...utils import add_start_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
+from .configuration_llama import LlamaConfig
+from transformers.utils.logging import get_logger
+logger = get_logger()
 
 _CONFIG_FOR_DOC = "LlamaConfig"
 
