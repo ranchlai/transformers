@@ -33,15 +33,16 @@ from ...modeling_utils import PreTrainedModel
 from ...utils import add_start_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
 from .configuration_llama import LlamaConfig
 from transformers.utils.logging import get_logger
+
 logger = get_logger()
 
 _CONFIG_FOR_DOC = "LlamaConfig"
 
 clipping = False
-clip_value =1000
+clip_value = 500
 
 if clipping:
-    logger.warning("clipping is on, will clip to 1000")
+    logger.warning(f"clipping is on, will clip to {clip_value}")
 
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
@@ -93,12 +94,12 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         if clipping:
             hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
-            
+
         # check if hidden_states is on the same device as self.weight, if not, cast
         if hidden_states.device != self.weight.device:
             print(f"hidden_states.device: {hidden_states.device}, self.weight.device: {self.weight.device}")
             hidden_states = hidden_states.to(self.weight.device)
-            
+
         return self.weight * hidden_states.to(input_dtype)
 
 
@@ -239,14 +240,14 @@ class LlamaMLP(nn.Module):
             act = self.act_fn(self.gate_proj(x))
             act = act.to(torch.float32)
             self.up_proj = self.up_proj.to(torch.float32)
-            up =  act * self.up_proj(x)
+            up = act * self.up_proj(x)
             if clipping:
                 up = torch.clamp(up, min=-clip_value, max=clip_value)
             down_proj = self.down_proj(up)
-           
+
             if clipping:
                 down_proj = torch.clamp(down_proj, min=-clip_value, max=clip_value)
-                
+
             down_proj = down_proj.to(input_type)
         return down_proj
 
@@ -317,7 +318,7 @@ class LlamaAttention(nn.Module):
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
-    
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -339,8 +340,6 @@ class LlamaAttention(nn.Module):
 
             query_states = [F.linear(hidden_states, query_slices[i]) for i in range(self.config.pretraining_tp)]
             query_states = torch.cat(query_states, dim=-1)
-            
-            
 
             key_states = [F.linear(hidden_states, key_slices[i]) for i in range(self.config.pretraining_tp)]
             key_states = torch.cat(key_states, dim=-1)
@@ -362,13 +361,15 @@ class LlamaAttention(nn.Module):
             kv_seq_len += past_key_value[0].shape[-2]
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         # print("position_ids at attention", position_ids)
-        
+
         # import pdb; pdb.set_trace()
         try:
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         except:
-            import pdb; pdb.set_trace()
-            
+            import pdb
+
+            pdb.set_trace()
+
         if past_key_value is not None:
             # reuse k, v, self_attention
             key_states = torch.cat([past_key_value[0], key_states], dim=2)
@@ -400,7 +401,9 @@ class LlamaAttention(nn.Module):
         try:
             attn_output = torch.matmul(attn_weights, value_states)
         except:
-            import pdb; pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
@@ -469,19 +472,19 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
         )
-    
+
         if clipping:
             hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
-            
+
         hidden_states = residual + hidden_states
 
         # Fully Connected
         residual = hidden_states
-            
+
         hidden_states = self.post_attention_layernorm(hidden_states)
         if clipping:
-            hidden_states = torch.clamp(hidden_states, max=1000, min=-1000)
-        
+            hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
+
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
@@ -738,7 +741,7 @@ class LlamaModel(LlamaPreTrainedModel):
             # print(idx, decoder_layer)
             # for name, param in decoder_layer.named_parameters():
             #     print(name, param.dtype, param.device)
-            
+
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -886,19 +889,22 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         )
 
         hidden_states = outputs[0]
-        
+
         if torch.isnan(hidden_states).any():
-            raise ValueError("hidden_states has nan")
-        
+            # warn the user
+            logger.warning("hidden_states has nan, but the training will be continued, setting nan to 0")
+            labels = None  # set labels to None to avoid loss calculation
+
         if self.config.pretraining_tp > 1:
-            lm_head_slices = self.lm_head.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)
-            logits = [F.linear(hidden_states, lm_head_slices[i]) for i in range(self.config.pretraining_tp)]
-            logits = torch.cat(logits, dim=-1)
+            raise NotImplementedError("pretraining_tp > 1 is not implemented yet")
+            # lm_head_slices = self.lm_head.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)
+            # logits = [F.linear(hidden_states, lm_head_slices[i]) for i in range(self.config.pretraining_tp)]
+            # logits = torch.cat(logits, dim=-1)
         else:
             logits = self.lm_head(hidden_states)
         logits = logits.float()
 
-        loss = None
+        loss = -1
         if labels is not None:
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
