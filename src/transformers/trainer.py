@@ -321,7 +321,6 @@ class Trainer:
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
     ):
-        
         # import pdb; pdb.set_trace()
         if args is None:
             output_dir = "tmp_trainer"
@@ -525,7 +524,7 @@ class Trainer:
                 "Passing `optimizers` is not allowed if Deepspeed or PyTorch FSDP is enabled."
                 "You should subclass `Trainer` and override the `create_optimizer_and_scheduler` method."
             )
-            
+
         # import pdb; pdb.set_trace()
         default_callbacks = DEFAULT_CALLBACKS + get_reporting_integration_callbacks(self.args.report_to)
         callbacks = default_callbacks if callbacks is None else default_callbacks + callbacks
@@ -1769,7 +1768,7 @@ class Trainer:
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
             epoch_iterator = train_dataloader
-            
+
             # will need to set
 
             # Reset the past mems state at the beginning of each epoch if necessary.
@@ -2694,6 +2693,13 @@ class Trainer:
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs)
 
+        if loss < 0:
+            # skip the rest of the step and continue with next step
+            logger.warning("model returned -1 loss, skipping the rest of the step")
+            self.optimizer.zero_grad()
+            # return a nan tensor
+            return torch.tensor(float("nan")).to(self.args.device)
+
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
 
@@ -2717,16 +2723,18 @@ class Trainer:
         else:
             labels = None
         outputs = model(**inputs)
-        # raise error if outputs contains nan
-        if torch.isnan(outputs["logits"]).any():
-            raise ValueError("Model outputs contains nan.")
-            
-            
+        # # raise error if outputs contains nan
+        # if torch.isnan(outputs["logits"]).any():
+        #     raise ValueError("Model outputs contains nan.")
+
         # import pdb; pdb.set_trace()
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
+        loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+        if loss is None:
+            return (None, outputs) if return_outputs else None
 
         if labels is not None:
             if is_peft_available() and isinstance(model, PeftModel):
@@ -3179,7 +3187,7 @@ class Trainer:
                 xm.mark_step()
 
             # Update containers on host
-            if loss is not None:
+            if loss is not None and not isinstance(loss, int):
                 losses = self.accelerator.gather_for_metrics((loss.repeat(batch_size)))
                 losses_host = losses if losses_host is None else nested_concat(losses_host, losses, padding_index=-100)
             if labels is not None:
@@ -3391,7 +3399,9 @@ class Trainer:
                 if has_labels or loss_without_labels:
                     with self.compute_loss_context_manager():
                         loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
-                    loss = loss.mean().detach()
+
+                    if not isinstance(loss, int):
+                        loss = loss.mean().detach()
 
                     if isinstance(outputs, dict):
                         logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
