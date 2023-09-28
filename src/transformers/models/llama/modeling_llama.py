@@ -39,7 +39,7 @@ logger = get_logger()
 _CONFIG_FOR_DOC = "LlamaConfig"
 
 clipping = False
-clip_value = 500
+clip_value = 5000
 
 if clipping:
     logger.warning(f"clipping is on, will clip to {clip_value}")
@@ -94,6 +94,7 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         if clipping:
             hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
+
 
         # check if hidden_states is on the same device as self.weight, if not, cast
         if hidden_states.device != self.weight.device:
@@ -241,11 +242,11 @@ class LlamaMLP(nn.Module):
             act = act.to(torch.float32)
             self.up_proj = self.up_proj.to(torch.float32)
             up = act * self.up_proj(x)
-            if clipping:
-                up = torch.clamp(up, min=-clip_value, max=clip_value)
+            # if clipping:
+                # up = torch.clamp(up, min=-clip_value, max=clip_value)
             down_proj = self.down_proj(up)
 
-            if clipping:
+            if clipping: #clipping before down_cast
                 down_proj = torch.clamp(down_proj, min=-clip_value, max=clip_value)
 
             down_proj = down_proj.to(input_type)
@@ -473,8 +474,8 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
         )
 
-        if clipping:
-            hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
+        # if clipping:
+        #     hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
 
         hidden_states = residual + hidden_states
 
