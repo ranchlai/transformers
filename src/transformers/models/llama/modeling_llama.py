@@ -38,8 +38,8 @@ logger = get_logger()
 
 _CONFIG_FOR_DOC = "LlamaConfig"
 
-clipping = False
-clip_value = 5000
+clipping = True
+clip_value = 1000
 
 if clipping:
     logger.warning(f"clipping is on, will clip to {clip_value}")
