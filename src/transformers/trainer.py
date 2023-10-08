@@ -2693,7 +2693,7 @@ class Trainer:
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs)
 
-        if loss < 0:
+        if isinstance(loss, int) and loss < 0:
             # skip the rest of the step and continue with next step
             logger.warning("model returned -1 loss, skipping the rest of the step")
             self.optimizer.zero_grad()
@@ -2737,6 +2737,7 @@ class Trainer:
             return (None, outputs) if return_outputs else None
 
         if labels is not None:
+            import pdb; pdb.set_trace()
             if is_peft_available() and isinstance(model, PeftModel):
                 model_name = unwrap_model(model.base_model)._get_name()
             else:
