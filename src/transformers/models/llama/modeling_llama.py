@@ -20,7 +20,8 @@
 """ PyTorch LLaMA model."""
 import math
 from typing import List, Optional, Tuple, Union
-
+import time
+import os
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -41,6 +42,8 @@ _CONFIG_FOR_DOC = "LlamaConfig"
 clipping = True
 clip_value = 1000
 
+MOVE_TO_CPU = os.getenv("MOVE_TO_CPU", "False") == "True"
+STARTING_LAYER = int(os.getenv("STARTING_LAYER", "0"))
 if clipping:
     logger.warning(f"clipping is on, will clip to {clip_value}")
 
@@ -77,7 +80,7 @@ def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] 
 
     return inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(dtype).min)
 
-
+attention_idx = 0
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -92,8 +95,8 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        if clipping:
-            hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
+        # if clipping:
+        #     hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
 
 
         # check if hidden_states is on the same device as self.weight, if not, cast
@@ -137,7 +140,6 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         # x: [bs, num_attention_heads, seq_len, head_size]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
-
         return (
             self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
             self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
@@ -219,6 +221,19 @@ class LlamaMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
+        
+        # if self.training:
+        #     device=torch.device("cpu")
+        #     self.up_proj.to(device)
+        #     self.down_proj.to(device)
+        #     self.gate_proj.to(device)
+        
+        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+            device = "cuda"
+            self.up_proj.to(device, non_blocking=True)
+            self.down_proj.to(device, non_blocking=True)
+            self.gate_proj.to(device, non_blocking=False)
+            
         input_type = x.dtype
         if self.config.pretraining_tp > 1:
             slice = self.intermediate_size // self.config.pretraining_tp
@@ -237,19 +252,33 @@ class LlamaMLP(nn.Module):
             ]
             down_proj = sum(down_proj)
         else:
-            x = x.to(torch.float32)
+            # x = x.to(torch.float32)
             act = self.act_fn(self.gate_proj(x))
-            act = act.to(torch.float32)
-            self.up_proj = self.up_proj.to(torch.float32)
             up = act * self.up_proj(x)
-            # if clipping:
-                # up = torch.clamp(up, min=-clip_value, max=clip_value)
+            if clipping:
+                up = torch.clamp(up, min=-clip_value, max=clip_value)
             down_proj = self.down_proj(up)
 
-            if clipping: #clipping before down_cast
-                down_proj = torch.clamp(down_proj, min=-clip_value, max=clip_value)
+            # if clipping: #clipping before down_cast
+            #     down_proj = torch.clamp(down_proj, min=-clip_value, max=clip_value)
 
-            down_proj = down_proj.to(input_type)
+            # # down_proj = down_proj.to(input_type)
+            
+        # self.up_proj.to("cpu")
+        # self.down_proj.to("cpu")
+        # self.gate_proj.to("cpu")
+        # if self.training:
+        #     device=torch.device("cpu")
+        #     self.up_proj.to(device)
+        #     self.down_proj.to(device)
+        #     self.gate_proj.to(device)
+        
+        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+            device = "cpu"
+            self.up_proj.to(device, non_blocking=True)
+            self.down_proj.to(device, non_blocking=True)
+            self.gate_proj.to(device, non_blocking=True)
+            
         return down_proj
 
 
@@ -331,6 +360,31 @@ class LlamaAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
+          
+        # self.q_proj.quant_linear_module.g_idx = self.q_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
+        # self.k_proj.quant_linear_module.g_idx = self.k_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
+        # self.v_proj.quant_linear_module.g_idx = self.v_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
+        # self.o_proj.quant_linear_module.g_idx = self.o_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
+        global attention_idx
+        attention_idx += 1
+        # print("attention_idx", attention_idx)
+        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+            device = "cuda"
+            # print(f"moving to cuda: {device}")
+            self.q_proj.to(device, non_blocking=True)
+            self.k_proj.to(device, non_blocking=True)
+            self.v_proj.to(device, non_blocking=True) # blocking
+            self.o_proj.to(device,non_blocking=False)
+            
+        # else:
+        #     device = "cpu"
+        #     self.k_proj.to(device)
+        #     self.q_proj.to(device)
+        #     self.o_proj.to(device)
+        #     self.v_proj.to(device)
+           
+        
+     
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
             query_slices = self.q_proj.weight.split(
@@ -420,11 +474,22 @@ class LlamaAttention(nn.Module):
             o_proj_slices = self.o_proj.weight.split(self.hidden_size // self.config.pretraining_tp, dim=1)
             attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.config.pretraining_tp)])
         else:
+            # self.o_proj.to("cuda:0")
             attn_output = self.o_proj(attn_output)
             torch.nn.Linear
         if not output_attentions:
             attn_weights = None
 
+        if self.training and attention_idx >  STARTING_LAYER and MOVE_TO_CPU:
+            device = "cpu"
+            # t = time.time()
+            # asynchonous put to cpu
+            self.k_proj.to(device, non_blocking=True)
+            self.q_proj.to(device, non_blocking=True)
+            self.o_proj.to(device, non_blocking=True)
+            self.v_proj.to(device, non_blocking=True)
+            # print(f"to cpu time: {time.time() - t}")
+            
         return attn_output, attn_weights, past_key_value
 
 
@@ -483,9 +548,11 @@ class LlamaDecoderLayer(nn.Module):
         residual = hidden_states
 
         hidden_states = self.post_attention_layernorm(hidden_states)
-        if clipping:
-            hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
+        # if clipping:
+        #     hidden_states = torch.clamp(hidden_states, max=clip_value, min=-clip_value)
 
+        # import pdb; pdb.set_trace()
+        # hidden_states = hidden_states.to(self.mlp.weight.device)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
@@ -684,6 +751,8 @@ class LlamaModel(LlamaPreTrainedModel):
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        global attention_idx
+        attention_idx = 0
         # retrieve input_ids and inputs_embeds
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both decoder_input_ids and decoder_inputs_embeds at the same time")
@@ -902,7 +971,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             # logits = [F.linear(hidden_states, lm_head_slices[i]) for i in range(self.config.pretraining_tp)]
             # logits = torch.cat(logits, dim=-1)
         else:
-            logits = self.lm_head(hidden_states)
+            logits = self.lm_head(hidden_states.to(self.lm_head.weight.dtype))
         logits = logits.float()
 
         loss = -1
