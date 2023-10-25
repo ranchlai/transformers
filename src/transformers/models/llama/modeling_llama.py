@@ -228,11 +228,11 @@ class LlamaMLP(nn.Module):
         #     self.down_proj.to(device)
         #     self.gate_proj.to(device)
         
-        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
-            device = "cuda"
-            self.up_proj.to(device, non_blocking=True)
-            self.down_proj.to(device, non_blocking=True)
-            self.gate_proj.to(device, non_blocking=False)
+        # if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+        #     device = "cuda"
+        #     self.up_proj.to(device, non_blocking=True)
+        #     self.down_proj.to(device, non_blocking=True)
+        #     self.gate_proj.to(device, non_blocking=False)
             
         input_type = x.dtype
         if self.config.pretraining_tp > 1:
@@ -273,11 +273,11 @@ class LlamaMLP(nn.Module):
         #     self.down_proj.to(device)
         #     self.gate_proj.to(device)
         
-        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
-            device = "cpu"
-            self.up_proj.to(device, non_blocking=True)
-            self.down_proj.to(device, non_blocking=True)
-            self.gate_proj.to(device, non_blocking=True)
+        # if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+        #     device = "cpu"
+        #     self.up_proj.to(device, non_blocking=True)
+        #     self.down_proj.to(device, non_blocking=True)
+        #     self.gate_proj.to(device, non_blocking=True)
             
         return down_proj
 
@@ -365,26 +365,22 @@ class LlamaAttention(nn.Module):
         # self.k_proj.quant_linear_module.g_idx = self.k_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
         # self.v_proj.quant_linear_module.g_idx = self.v_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
         # self.o_proj.quant_linear_module.g_idx = self.o_proj.quant_linear_module.g_idx.to(torch.device("cpu"))
-        global attention_idx
-        attention_idx += 1
-        # print("attention_idx", attention_idx)
-        if self.training and attention_idx > STARTING_LAYER and MOVE_TO_CPU:
+        # global attention_idx
+        # attention_idx += 1
+        
+        if self.training and MOVE_TO_CPU:
             device = "cuda"
             # print(f"moving to cuda: {device}")
+            # pin memory
+            # import pdb; pdb.set_trace()
+            # if not self.q_proj.bias.is_pinned():
+            #     print("q_proj is pinned")
+            #     self.q_proj.bias.pin_memory()
             self.q_proj.to(device, non_blocking=True)
             self.k_proj.to(device, non_blocking=True)
             self.v_proj.to(device, non_blocking=True) # blocking
-            self.o_proj.to(device,non_blocking=False)
+            self.o_proj.to(device, non_blocking=True)
             
-        # else:
-        #     device = "cpu"
-        #     self.k_proj.to(device)
-        #     self.q_proj.to(device)
-        #     self.o_proj.to(device)
-        #     self.v_proj.to(device)
-           
-        
-     
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
             query_slices = self.q_proj.weight.split(
@@ -417,13 +413,8 @@ class LlamaAttention(nn.Module):
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         # print("position_ids at attention", position_ids)
 
-        # import pdb; pdb.set_trace()
-        try:
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-        except:
-            import pdb
-
-            pdb.set_trace()
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+       
 
         if past_key_value is not None:
             # reuse k, v, self_attention
@@ -453,12 +444,8 @@ class LlamaAttention(nn.Module):
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        try:
-            attn_output = torch.matmul(attn_weights, value_states)
-        except:
-            import pdb
-
-            pdb.set_trace()
+        attn_output = torch.matmul(attn_weights, value_states)
+        
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
@@ -480,9 +467,8 @@ class LlamaAttention(nn.Module):
         if not output_attentions:
             attn_weights = None
 
-        if self.training and attention_idx >  STARTING_LAYER and MOVE_TO_CPU:
+        if self.training and MOVE_TO_CPU:
             device = "cpu"
-            # t = time.time()
             # asynchonous put to cpu
             self.k_proj.to(device, non_blocking=True)
             self.q_proj.to(device, non_blocking=True)
